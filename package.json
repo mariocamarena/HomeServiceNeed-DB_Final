@@ -1,0 +1,26 @@
+{
+  "name": "homeneedsservice",
+  "version": "1.0.0",
+  "description": "HomeNeedsService.com - CSCI 6333 Project (MacOs team)",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "db:test": "node scripts/test-connection.js",
+    "db:rehash": "node scripts/rehash-seed.js",
+    "test:fns": "node scripts/test-functions.js",
+    "test:flow": "node scripts/test-booking-flow.js"
+  },
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "connect-pg-simple": "^10.0.0",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.21.0",
+    "express-session": "^1.18.0",
+    "pg": "^8.13.0"
+  }
+}

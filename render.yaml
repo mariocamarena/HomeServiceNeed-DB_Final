@@ -1,0 +1,16 @@
+# render blueprint - lets render auto-detect the service config
+services:
+  - type: web
+    name: homeneeds
+    env: node
+    plan: free
+    rootDir: app
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
