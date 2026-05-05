@@ -1,7 +1,9 @@
 // read queries
 const { ExecuteQuery } = require('../db');
+const { filterByDistance } = require('./geo');
 
-// providers in a given category, with avg rating
+// providers in a given category, with avg rating, optionally filtered by
+// haversine distance from a user-supplied zip
 async function ProviderSearchRetrieval(categoryId, zip, radiusMiles) {
     const sql = `
         SELECT u.user_id, u.first_name, u.last_name,
@@ -16,8 +18,9 @@ async function ProviderSearchRetrieval(categoryId, zip, radiusMiles) {
         LEFT JOIN reviews r ON r.booking_id = b.booking_id
         WHERE ps.category_id = $1
         GROUP BY u.user_id, pp.bio, pp.home_zip, pp.travel_radius_miles, pp.base_rate, pp.verified_status, ps.starting_price
-        ORDER BY avg_rating DESC, pp.base_rate ASC`;
-    return ExecuteQuery(sql, [categoryId]);
+        ORDER BY (pp.home_zip = $2) DESC, avg_rating DESC, pp.base_rate ASC`;
+    const rows = await ExecuteQuery(sql, [categoryId, zip || '']);
+    return filterByDistance(rows, zip || '', radiusMiles);
 }
 
 async function BookingDetailRetrieval(bookingId) {
@@ -187,9 +190,29 @@ async function UserStatsRetrieval() {
     return rows[0];
 }
 
+// admin - all users with role
+async function AllUsersRetrieval() {
+    return ExecuteQuery(`
+        SELECT user_id, first_name, last_name, email, phone, role_type, created_at
+        FROM users
+        ORDER BY created_at DESC`);
+}
+
+// admin - all background checks across the system
+async function AllBackgroundChecksRetrieval() {
+    return ExecuteQuery(`
+        SELECT bc.check_id, bc.user_id, bc.check_type, bc.status,
+               bc.requested_at, bc.completed_at,
+               u.first_name, u.last_name, u.email, u.role_type
+        FROM background_checks bc
+        JOIN users u ON u.user_id = bc.user_id
+        ORDER BY bc.requested_at DESC`);
+}
+
 module.exports = {
     ProviderSearchRetrieval, AllProvidersRetrieval, BookingDetailRetrieval, ProviderProfileRetrieval,
     ClientProfileRetrieval, ServiceRequestListRetrieval, OpenRequestsByCategory,
     BookingListRetrieval, ProviderReviewsRetrieval, CategoryListRetrieval,
-    BackgroundCheckRetrieval, UserStatsRetrieval
+    BackgroundCheckRetrieval, UserStatsRetrieval,
+    AllUsersRetrieval, AllBackgroundChecksRetrieval
 };

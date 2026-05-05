@@ -5,11 +5,13 @@ const { Authorize, RegisterUser, CreateSession, DestroySession } = require('../f
 const {
     CategoryListRetrieval, ServiceRequestListRetrieval, BookingListRetrieval,
     ProviderProfileRetrieval, ProviderReviewsRetrieval, OpenRequestsByCategory,
-    UserStatsRetrieval, ProviderSearchRetrieval, AllProvidersRetrieval, BookingDetailRetrieval
+    UserStatsRetrieval, ProviderSearchRetrieval, AllProvidersRetrieval, BookingDetailRetrieval,
+    BackgroundCheckRetrieval, AllUsersRetrieval, AllBackgroundChecksRetrieval
 } = require('../functions/dataRetrieval');
 const {
     CreateServiceRequest, UpdateProviderProfile, UpdateProviderServices,
-    UpdateRequestStatus, DeleteServiceRequest
+    UpdateRequestStatus, DeleteServiceRequest, SubmitBackgroundCheck,
+    UpdateCheckStatus, AddCategory, DeleteCategory
 } = require('../functions/dataUpdate');
 const { CreateBooking, UpdateBookingStatus } = require('../functions/bookingMatching');
 const { ProcessPayment, SubmitReview } = require('../functions/paymentReview');
@@ -80,8 +82,15 @@ router.get('/providers', wrap(async (req, res) => {
 // keep this BEFORE the /:id route or it gets shadowed
 router.get('/providers/search', wrap(async (req, res) => {
     const { categoryId, zip, radius } = req.query;
-    if (!categoryId) return res.status(400).json({ error: 'categoryId required' });
-    res.json(await ProviderSearchRetrieval(Number(categoryId), zip || '', Number(radius) || 50));
+    const r = Number(radius) || 0;
+    if (categoryId) {
+        res.json(await ProviderSearchRetrieval(Number(categoryId), zip || '', r));
+    } else {
+        // no category - filter the full provider list by distance
+        const all = await AllProvidersRetrieval();
+        const { filterByDistance } = require('../functions/geo');
+        res.json(await filterByDistance(all, zip || '', r));
+    }
 }));
 
 router.get('/providers/:id', wrap(async (req, res) => {
@@ -193,9 +202,45 @@ router.post('/reviews', requireRole('client'), wrap(async (req, res) => {
     res.status(result.error ? 400 : 200).json(result);
 }));
 
+// provider background checks
+router.get('/provider/checks', requireRole('provider'), wrap(async (req, res) => {
+    res.json(await BackgroundCheckRetrieval(req.session.userId));
+}));
+
+router.post('/provider/checks', requireRole('provider'), wrap(async (req, res) => {
+    const checkType = (req.body && req.body.check_type) || 'identity';
+    const allowed = ['identity', 'background'];
+    if (!allowed.includes(checkType)) return res.status(400).json({ error: 'bad check type' });
+    const result = await SubmitBackgroundCheck(req.session.userId, checkType);
+    res.status(result.error ? 400 : 200).json(result);
+}));
+
 // admin
 router.get('/admin/stats', requireRole('admin'), wrap(async (req, res) => {
     res.json(await UserStatsRetrieval());
+}));
+
+router.get('/admin/users', requireRole('admin'), wrap(async (req, res) => {
+    res.json(await AllUsersRetrieval());
+}));
+
+router.get('/admin/checks', requireRole('admin'), wrap(async (req, res) => {
+    res.json(await AllBackgroundChecksRetrieval());
+}));
+
+router.post('/admin/checks/:id/status', requireRole('admin'), wrap(async (req, res) => {
+    const result = await UpdateCheckStatus(Number(req.params.id), req.body && req.body.status);
+    res.status(result.error ? 400 : 200).json(result);
+}));
+
+router.post('/admin/categories', requireRole('admin'), wrap(async (req, res) => {
+    const result = await AddCategory(req.body && req.body.name);
+    res.status(result.error ? 400 : 200).json(result);
+}));
+
+router.delete('/admin/categories/:id', requireRole('admin'), wrap(async (req, res) => {
+    const result = await DeleteCategory(Number(req.params.id));
+    res.status(result.error ? 400 : 200).json(result);
 }));
 
 // any thrown error -> json

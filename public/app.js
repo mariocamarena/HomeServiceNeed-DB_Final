@@ -36,6 +36,7 @@ const tabs = {
         { id: 'dashboard', label: 'Dashboard' },
         { id: 'newReq', label: 'New request' },
         { id: 'openReqs', label: 'Open requests' },
+        { id: 'browse', label: 'Providers' },
         { group: 'account' },
         { id: 'profile', label: 'Profile' },
         { id: 'logout', label: 'Sign out' }
@@ -43,6 +44,9 @@ const tabs = {
     admin: [
         { group: 'admin' },
         { id: 'admin', label: 'Overview' },
+        { id: 'adminUsers', label: 'Users' },
+        { id: 'adminChecks', label: 'Background checks' },
+        { id: 'adminCategories', label: 'Categories' },
         { id: 'logout', label: 'Sign out' }
     ]
 };
@@ -76,13 +80,89 @@ function renderTabs() {
         const el = document.createElement('div');
         el.className = 'tab' + (t.id === state.activeTab ? ' active' : '');
         el.textContent = t.label;
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
         el.onclick = () => switchTab(t.id);
+        el.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                switchTab(t.id);
+            }
+        };
         rail.appendChild(el);
     });
 }
 
+// wrap each word in h1.display in a span so we can stagger the entry animation
+function splitDisplayWords(panel) {
+    panel.querySelectorAll('h1.display').forEach(h => {
+        let i = 0;
+        const wrap = (node) => {
+            if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent;
+                const frag = document.createDocumentFragment();
+                // split on whitespace but keep spaces as plain text nodes
+                const parts = text.split(/(\s+)/);
+                for (const p of parts) {
+                    if (p === '') continue;
+                    if (/^\s+$/.test(p)) {
+                        frag.appendChild(document.createTextNode(p));
+                    } else {
+                        const s = document.createElement('span');
+                        s.className = 'word';
+                        s.style.setProperty('--i', i++);
+                        s.textContent = p;
+                        frag.appendChild(s);
+                    }
+                }
+                node.parentNode.replaceChild(frag, node);
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+                Array.from(node.childNodes).forEach(wrap);
+            }
+        };
+        Array.from(h.childNodes).forEach(wrap);
+    });
+}
+
+// returns a Promise that resolves after innerHTML is replaced; callers that
+// need to query the new DOM must await it
+let _panelTurning = false;
 function setPanel(html) {
-    document.getElementById('panel').innerHTML = html;
+    return new Promise(resolve => {
+        const panel = document.getElementById('panel');
+        const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+        const hasContent = panel.children.length > 0;
+
+        const render = () => {
+            panel.classList.remove('panel-out');
+            panel.innerHTML = html;
+            // force a reflow so the panel-in animation re-fires
+            void panel.offsetWidth;
+            panel.classList.add('panel-in');
+            splitDisplayWords(panel);
+            const announce = document.getElementById('announce');
+            const heading = panel.querySelector('h1.display');
+            if (announce && heading) announce.textContent = heading.textContent;
+            _panelTurning = false;
+            resolve();
+        };
+
+        if (!hasContent || reduce) {
+            panel.classList.remove('panel-in');
+            render();
+            return;
+        }
+
+        if (_panelTurning) {
+            // already mid-turn, swap immediately
+            render();
+            return;
+        }
+        _panelTurning = true;
+        panel.classList.remove('panel-in');
+        panel.classList.add('panel-out');
+        setTimeout(render, 240);
+    });
 }
 
 async function switchTab(id) {
@@ -114,15 +194,15 @@ async function api(path, opts) {
 const panels = {
     home() {
         const cta = state.user
-            ? `<button class="btn accent" onclick="switchTab('dashboard')">Dashboard</button>
-               <button class="btn ghost" onclick="switchTab('browse')">Browse providers</button>`
-            : `<button class="btn accent" onclick="switchTab('register')">Register</button>
+            ? `<button class="btn accent" onclick="switchTab('dashboard')">Open dashboard</button>
+               <button class="btn ghost" onclick="switchTab('browse')">Browse the directory</button>`
+            : `<button class="btn accent" onclick="switchTab('register')">Begin an account</button>
                <button class="btn ghost" onclick="switchTab('login')">Sign in</button>`;
         setPanel(`
-            <h1 class="display">homeneeds</h1>
-            <p class="sub">// marketplace for home services</p>
+            <p class="eyebrow">Vol. I &nbsp;·&nbsp; No. 1 &nbsp;·&nbsp; The Directory</p>
+            <h1 class="display">A trusted hand for <em>every corner</em> of the home.</h1>
             <div class="btn-row">${cta}</div>
-            <h2 class="section">categories</h2>
+            <h2 class="section">The trades</h2>
             <div class="chips">
                 <span class="chip" onclick="switchTab('browse')">Plumbing</span>
                 <span class="chip" onclick="switchTab('browse')">Cleaning</span>
@@ -133,16 +213,46 @@ const panels = {
                 <span class="chip" onclick="switchTab('browse')">Appliance Repair</span>
                 <span class="chip" onclick="switchTab('browse')">Pest Control</span>
             </div>
+            <h2 class="section">How it works</h2>
+            <div class="cards">
+                <div class="card"><h3>I.</h3><div class="meta">Post a request</div></div>
+                <div class="card"><h3>II.</h3><div class="meta">A vetted craftsperson responds</div></div>
+                <div class="card"><h3>III.</h3><div class="meta">Agree on time and price</div></div>
+                <div class="card"><h3>IV.</h3><div class="meta">Pay and review on completion</div></div>
+            </div>
         `);
     },
     async browse() {
         const [cats, all] = await Promise.all([api('/api/categories'), api('/api/providers')]);
         state.allProviders = all;
+        state.allCategories = cats;
         state.catFilter = null;
-        setPanel(`
+        await setPanel(`
             <h1 class="display">providers</h1>
-            <p class="sub">// ${all.length} total</p>
-            <div class="chips" id="catChips">
+
+            <form class="form" onsubmit="searchProviders(event)" style="max-width:none">
+                <div class="btn-row" style="margin-top:0;align-items:flex-end">
+                    <div class="field" style="margin-bottom:0">
+                        <label>category</label>
+                        <select name="categoryId">
+                            <option value="">- any -</option>
+                            ${cats.map(c => `<option value="${c.category_id}">${c.category_name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="field" style="margin-bottom:0">
+                        <label>zip</label>
+                        <input name="zip" pattern="\\d{5}" maxlength="5" placeholder="optional">
+                    </div>
+                    <div class="field" style="margin-bottom:0">
+                        <label>radius (mi)</label>
+                        <input type="number" name="radius" value="50" min="1" max="500">
+                    </div>
+                    <button class="btn accent" type="submit">Search</button>
+                    <button class="btn ghost" type="button" onclick="switchTab('browse')">Reset</button>
+                </div>
+            </form>
+
+            <div class="chips" id="catChips" style="margin-top:14px">
                 <span class="chip active" data-id="">All</span>
                 ${cats.map(c => `<span class="chip" data-id="${c.category_id}">${c.category_name}</span>`).join('')}
             </div>
@@ -170,8 +280,7 @@ const panels = {
         const list = await api('/api/openRequests');
         setPanel(`
             <h1 class="display">open requests</h1>
-            <p class="sub">// available work</p>
-            ${list.length === 0 ? '<p class="muted">none right now</p>' :
+            ${list.length === 0 ? '<p class="muted">✦ &nbsp;No open requests at the moment.</p>' :
                 `<table class="grid">
                     <thead><tr><th>#</th><th>category</th><th>where</th><th>when</th><th>client</th></tr></thead>
                     <tbody>
@@ -192,19 +301,19 @@ const panels = {
         if (state.user.role === 'client') {
             setPanel(`
                 <h1 class="display">profile</h1>
-                <p class="sub">// client account</p>
-                <p>signed in as <b>${state.user.first_name}</b> (${state.user.role})</p>
-                <p class="muted">no editable fields for clients yet</p>
+                <p>Signed in as <b>${state.user.first_name}</b> (${state.user.role}).</p>
             `);
             return;
         }
-        const data = await api('/api/dashboard/provider');
-        const cats = await api('/api/categories');
+        const [data, cats, checks] = await Promise.all([
+            api('/api/dashboard/provider'),
+            api('/api/categories'),
+            api('/api/provider/checks').catch(() => [])
+        ]);
         const p = data.profile || {};
         const myCatIds = (p.categories || []).map(c => c.category_id);
         setPanel(`
             <h1 class="display">profile</h1>
-            <p class="sub">// provider settings</p>
             <div id="msg"></div>
             <form class="form" onsubmit="saveProfile(event)">
                 <div class="field"><label>bio</label><textarea name="bio">${p.bio || ''}</textarea></div>
@@ -215,7 +324,6 @@ const panels = {
             </form>
 
             <h2 class="section">categories</h2>
-            <p class="sub">// services you offer</p>
             <form class="form" onsubmit="saveServices(event)" style="max-width:none">
                 <div class="chips" id="catPicker">
                     ${cats.map(c => `
@@ -226,6 +334,33 @@ const panels = {
                 </div>
                 <div class="btn-row"><button class="btn accent" type="submit">Save categories</button></div>
             </form>
+
+            <h2 class="section">background checks</h2>
+            <p>Status: <b>${p.verified_status || 'unverified'}</b></p>
+            ${checks.length === 0 ? '<p class="muted">✦ &nbsp;No background checks on file yet.</p>' :
+                `<table class="grid">
+                    <thead><tr><th>#</th><th>type</th><th>status</th><th>requested</th><th>completed</th></tr></thead>
+                    <tbody>
+                        ${checks.map(c => `
+                            <tr>
+                                <td>${c.check_id}</td>
+                                <td>${c.check_type}</td>
+                                <td>${statusBadge(c.status)}</td>
+                                <td>${fmtDate(c.requested_at)}</td>
+                                <td>${c.completed_at ? fmtDate(c.completed_at) : '-'}</td>
+                            </tr>`).join('')}
+                    </tbody>
+                </table>`}
+            <form class="form" onsubmit="requestCheck(event)" style="margin-top:10px">
+                <div class="field">
+                    <label>request new check</label>
+                    <select name="check_type">
+                        <option value="identity">identity</option>
+                        <option value="background">background</option>
+                    </select>
+                </div>
+                <div class="btn-row"><button class="btn accent" type="submit">Request background check</button></div>
+            </form>
         `);
     },
     async newReq() {
@@ -233,7 +368,6 @@ const panels = {
         const cats = await api('/api/categories');
         setPanel(`
             <h1 class="display">new request</h1>
-            <p class="sub">// post a job</p>
             <div id="msg"></div>
             <form class="form" onsubmit="createRequest(event)">
                 <div class="field">
@@ -254,10 +388,18 @@ const panels = {
     admin() {
         return loadAdmin();
     },
+    adminUsers() {
+        return loadAdminUsers();
+    },
+    adminChecks() {
+        return loadAdminChecks();
+    },
+    adminCategories() {
+        return loadAdminCategories();
+    },
     login() {
         setPanel(`
             <h1 class="display">sign in</h1>
-            <p class="sub">// existing accounts</p>
             <div id="msg"></div>
             <form class="form" onsubmit="doLogin(event)">
                 <div class="field"><label>email</label><input type="email" name="email" required></div>
@@ -272,7 +414,6 @@ const panels = {
     register() {
         setPanel(`
             <h1 class="display">register</h1>
-            <p class="sub">// new account</p>
             <div id="msg"></div>
             <form class="form" onsubmit="doRegister(event)">
                 <div class="field"><label>first name</label><input name="firstName" required></div>
@@ -298,18 +439,170 @@ const panels = {
 };
 
 function fmtDate(s) {
-    if (!s) return '-';
+    if (!s) return '—';
     const d = new Date(s);
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const day = d.toLocaleDateString([], { weekday: 'short' });
+    const month = d.toLocaleDateString([], { month: 'short' });
+    const date = d.getDate();
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    return `${day}, ${month} ${date} · ${time}`;
 }
 
 function fmtMoney(n) {
-    if (n == null) return '-';
+    if (n == null) return '—';
     return '$' + Number(n).toFixed(2);
 }
 
 function statusBadge(s) {
-    return `<span class="badge ${s}">${s}</span>`;
+    return `<span class="badge ${s}">${(s || '').replace(/_/g, ' ')}</span>`;
+}
+
+// star rating display
+function fmtStars(rating, count) {
+    const r = Number(rating) || 0;
+    const rounded = Math.round(r);
+    let stars = '';
+    for (let i = 0; i < 5; i++) {
+        stars += `<span class="star ${i < rounded ? 'full' : 'empty'}">${i < rounded ? '★' : '☆'}</span>`;
+    }
+    const num = `<span class="rating-num">${r.toFixed(1)}</span>`;
+    const cnt = (count != null) ? `<span class="rating-count">(${count})</span>` : '';
+    return `<span class="rating">${stars} ${num} ${cnt}</span>`;
+}
+
+// avatar background colors, picked by hashing the provider's name
+const _avatarPalette = [
+    { bg: '#1A1612', fg: '#F3EDDF' },
+    { bg: '#8E3A1E', fg: '#F3EDDF' },
+    { bg: '#6E7A52', fg: '#F3EDDF' },
+    { bg: '#C09040', fg: '#1A1612' }
+];
+function hueForName(first, last) {
+    const s = ((first || '') + (last || '')).toLowerCase();
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    return _avatarPalette[Math.abs(h) % _avatarPalette.length];
+}
+function avatarTag(first, last, sizeStyle = '') {
+    const t = hueForName(first, last);
+    return `<div class="avatar" style="background:${t.bg};color:${t.fg};${sizeStyle}">${initials(first, last)}</div>`;
+}
+
+// booking status timeline
+function statusTimeline(status) {
+    if (status === 'cancelled') {
+        return `<div class="timeline timeline-cancelled"><span>Cancelled</span></div>`;
+    }
+    const steps = [
+        { key: 'scheduled',   label: 'Scheduled' },
+        { key: 'in_progress', label: 'In progress' },
+        { key: 'completed',   label: 'Completed' }
+    ];
+    const idx = steps.findIndex(s => s.key === status);
+    const cur = idx < 0 ? 0 : idx;
+    const parts = steps.map((s, i) => {
+        const cls = i < cur ? 'past' : (i === cur ? 'current' : 'future');
+        const dot = i < cur ? '✦' : (i === cur ? '◆' : '·');
+        return `<div class="step ${cls}"><span class="dot">${dot}</span><span class="lbl">${s.label}</span></div>`;
+    });
+    return `<div class="timeline">${parts.join('<div class="line"></div>')}</div>`;
+}
+
+// transient toast notification - dedupes by message so spam clicks don't stack
+function toast(message, kind = 'ok') {
+    const root = document.getElementById('toasts');
+    if (!root) return;
+    const armDismiss = (el) => {
+        if (el._dismiss) clearTimeout(el._dismiss);
+        el._dismiss = setTimeout(() => {
+            el.classList.remove('toast-in');
+            el.classList.add('toast-out');
+            setTimeout(() => el.remove(), 420);
+        }, 3200);
+    };
+    const existing = Array.from(root.children).find(c => c._msg === message);
+    if (existing) {
+        existing.classList.remove('toast-out');
+        existing.classList.add('toast-in');
+        armDismiss(existing);
+        return;
+    }
+    const el = document.createElement('div');
+    el.className = `toast toast-${kind}`;
+    el._msg = message;
+    el.innerHTML = `<span class="toast-mark">✦</span><span>${message}</span>`;
+    root.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('toast-in'));
+    armDismiss(el);
+}
+
+// confirm dialog (replaces native confirm)
+function confirmDialog(message, opts = {}) {
+    return new Promise(resolve => {
+        const root = document.getElementById('modal-root');
+        if (!root) return resolve(window.confirm(message));
+        const ok = opts.okLabel || 'Confirm';
+        const cancel = opts.cancelLabel || 'Cancel';
+        root.innerHTML = `
+            <div class="modal-backdrop" data-close></div>
+            <div class="modal-card" role="alertdialog" aria-modal="true" aria-labelledby="modal-msg">
+                <p class="modal-eyebrow">✦ &nbsp;Confirm</p>
+                <p class="modal-message" id="modal-msg">${message}</p>
+                <div class="modal-actions">
+                    <button class="btn ghost" type="button" data-cancel>${cancel}</button>
+                    <button class="btn accent" type="button" data-ok>${ok}</button>
+                </div>
+            </div>
+        `;
+        root.classList.add('open');
+        const close = (val) => {
+            root.classList.remove('open');
+            document.removeEventListener('keydown', esc);
+            setTimeout(() => { root.innerHTML = ''; }, 220);
+            resolve(val);
+        };
+        const esc = (e) => {
+            if (e.key === 'Escape') close(false);
+            if (e.key === 'Enter')  close(true);
+        };
+        root.querySelector('[data-ok]').onclick = () => close(true);
+        root.querySelector('[data-cancel]').onclick = () => close(false);
+        root.querySelector('[data-close]').onclick = () => close(false);
+        document.addEventListener('keydown', esc);
+        setTimeout(() => root.querySelector('[data-cancel]').focus(), 60);
+    });
+}
+
+async function searchProviders(ev) {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    const categoryId = fd.get('categoryId');
+    const zip = fd.get('zip') || '';
+    const radius = fd.get('radius') || 50;
+    if (Number(radius) > 0 && !zip) {
+        toast('Enter a ZIP to filter by distance — radius needs an anchor location.', 'error');
+    }
+    const qs = `zip=${encodeURIComponent(zip)}&radius=${radius}` + (categoryId ? `&categoryId=${categoryId}` : '');
+    const list = await api(`/api/providers/search?${qs}`);
+    if (categoryId) {
+        // server returns one starting_price per row for the chosen category;
+        // build a categories array so the card render still works
+        state.allProviders = list.map(p => ({
+            ...p,
+            categories: [{
+                category_id: Number(categoryId),
+                category_name: (state.allCategories.find(c => c.category_id == categoryId) || {}).category_name
+            }]
+        }));
+    } else {
+        // server already returns providers with their full categories array
+        state.allProviders = list;
+    }
+    state.catFilter = null;
+    document.querySelectorAll('#catChips .chip').forEach(c => c.classList.remove('active'));
+    const allChip = document.querySelector('#catChips .chip[data-id=""]');
+    if (allChip) allChip.classList.add('active');
+    renderProviders();
 }
 
 function filterProviders(el) {
@@ -327,7 +620,7 @@ function renderProviders() {
         ? state.allProviders.filter(p => p.categories.some(c => c.category_id === state.catFilter))
         : state.allProviders;
     if (list.length === 0) {
-        r.innerHTML = '<p class="muted">no providers</p>';
+        r.innerHTML = '<p class="muted">✦ &nbsp;The directory holds no entries for this filter.</p>';
         return;
     }
     r.innerHTML = `<div class="cards">${list.map(renderProviderCard).join('')}</div>`;
@@ -343,7 +636,7 @@ function renderProviderCard(p) {
     return `
         <div class="pcard" onclick="openProvider(${p.user_id})">
             <div class="pcard-head">
-                <div class="avatar">${initials(p.first_name, p.last_name)}</div>
+                ${avatarTag(p.first_name, p.last_name)}
                 <div>
                     <div class="pcard-name">${p.first_name} ${p.last_name}</div>
                     <div class="pcard-tag ${verified ? 'verified' : ''}">${verified ? 'verified' : 'unverified'}${cats ? ' &middot; ' + cats : ''}</div>
@@ -352,9 +645,11 @@ function renderProviderCard(p) {
             <div class="pcard-bio">${p.bio || '<span class="muted">no bio</span>'}</div>
             <div class="pcard-meta">
                 <span><b>${fmtMoney(p.base_rate)}</b>/hr</span>
-                <span>${Number(p.avg_rating).toFixed(1)}/5 <b>(${p.review_count})</b></span>
-                <span>zip <b>${p.home_zip || '-'}</b></span>
-                <span>radius <b>${p.travel_radius_miles || '-'}mi</b></span>
+                <span>${fmtStars(p.avg_rating, p.review_count)}</span>
+                <span>zip <b>${p.home_zip || '—'}</b></span>
+                <span>${p.distance_miles != null
+                    ? (p.distance_miles === 0 ? 'at your <b>zip</b>' : `<b>${p.distance_miles}</b> miles away`)
+                    : `travels up to <b>${p.travel_radius_miles || '—'}mi</b>`}</span>
             </div>
         </div>`;
 }
@@ -367,10 +662,10 @@ async function openProvider(id) {
             <button class="btn ghost" onclick="switchTab('browse')">&larr; back</button>
         </div>
         <div class="pcard-head" style="gap:14px;margin-bottom:8px">
-            <div class="avatar" style="width:56px;height:56px;flex:0 0 56px;font-size:18px">${initials(p.first_name, p.last_name)}</div>
+            ${avatarTag(p.first_name, p.last_name, 'width:56px;height:56px;flex:0 0 56px;font-size:18px')}
             <div>
                 <h1 class="display" style="margin:0">${p.first_name} ${p.last_name}</h1>
-                <p class="sub" style="margin:4px 0 0 0">// <span class="${verified ? '' : 'muted'}" style="${verified ? 'color:var(--accent)' : ''}">${p.verified_status || 'unverified'}</span></p>
+                <div class="pcard-tag ${verified ? 'verified' : ''}" style="margin-top:6px">${p.verified_status || 'unverified'}</div>
             </div>
         </div>
 
@@ -384,7 +679,7 @@ async function openProvider(id) {
         </div>
 
         <h2 class="section">services</h2>
-        ${p.categories.length === 0 ? '<p class="muted">none listed</p>' :
+        ${p.categories.length === 0 ? '<p class="muted">✦ &nbsp;No services listed.</p>' :
             `<table class="grid">
                 <thead><tr><th>category</th><th>starting</th><th>notes</th></tr></thead>
                 <tbody>
@@ -398,12 +693,12 @@ async function openProvider(id) {
             </table>`}
 
         <h2 class="section">reviews</h2>
-        ${p.reviews.length === 0 ? '<p class="muted">no reviews yet</p>' :
+        ${p.reviews.length === 0 ? '<p class="muted">✦ &nbsp;No reviews on record yet.</p>' :
             p.reviews.map(r => `
                 <div class="card" style="margin-bottom:8px">
-                    <h3>${r.rating}/5 &mdash; ${r.client_first} ${r.client_last}</h3>
-                    <div class="meta">${fmtDate(r.created_at)}</div>
-                    ${r.comment ? `<p style="margin:6px 0 0 0">${r.comment}</p>` : ''}
+                    <h3>${r.client_first} ${r.client_last}</h3>
+                    <div class="meta">${fmtStars(r.rating)} &nbsp;·&nbsp; ${fmtDate(r.created_at)}</div>
+                    ${r.comment ? `<p style="margin:8px 0 0 0">${r.comment}</p>` : ''}
                 </div>`).join('')}
     `);
 }
@@ -411,12 +706,11 @@ async function openProvider(id) {
 async function loadClientDash() {
     const data = await api('/api/dashboard/client');
     const { requests, bookings } = data;
-    setPanel(`
-        <h1 class="display">${state.user.first_name.toLowerCase()}'s dashboard</h1>
-        <p class="sub">// client view</p>
+    await setPanel(`
+        <h1 class="display">Dashboard</h1>
 
         <h2 class="section">requests</h2>
-        ${requests.length === 0 ? '<p class="muted">none yet</p>' :
+        ${requests.length === 0 ? '<p class="muted">✦ &nbsp;No requests posted yet.</p>' :
             `<table class="grid">
                 <thead><tr><th>#</th><th>category</th><th>status</th><th>when</th><th></th></tr></thead>
                 <tbody>
@@ -432,7 +726,7 @@ async function loadClientDash() {
             </table>`}
 
         <h2 class="section">bookings</h2>
-        ${bookings.length === 0 ? '<p class="muted">none yet</p>' :
+        ${bookings.length === 0 ? '<p class="muted">✦ &nbsp;No bookings yet.</p>' :
             `<table class="grid">
                 <thead><tr><th>#</th><th>category</th><th>provider</th><th>when</th><th>price</th><th>status</th><th>paid</th></tr></thead>
                 <tbody>
@@ -455,8 +749,6 @@ async function loadProviderDashHtml() {
     const data = await api('/api/dashboard/provider');
     const { profile, bookings, reviews } = data;
     return `
-        <p class="sub">// provider view</p>
-
         <div class="cards">
             <div class="card"><h3>${bookings.length}</h3><div class="meta">total bookings</div></div>
             <div class="card"><h3>${Number(reviews.avg_rating).toFixed(1)}/5</h3><div class="meta">avg rating (${reviews.total})</div></div>
@@ -465,7 +757,7 @@ async function loadProviderDashHtml() {
         </div>
 
         <h2 class="section">jobs</h2>
-        ${bookings.length === 0 ? '<p class="muted">none yet</p>' :
+        ${bookings.length === 0 ? '<p class="muted">✦ &nbsp;No jobs accepted yet.</p>' :
             `<table class="grid">
                 <thead><tr><th>#</th><th>category</th><th>client</th><th>when</th><th>price</th><th>status</th></tr></thead>
                 <tbody>
@@ -482,33 +774,155 @@ async function loadProviderDashHtml() {
             </table>`}
 
         <h2 class="section">recent reviews</h2>
-        ${reviews.reviews.length === 0 ? '<p class="muted">none yet</p>' :
+        ${reviews.reviews.length === 0 ? '<p class="muted">✦ &nbsp;No reviews on record yet.</p>' :
             reviews.reviews.slice(0, 5).map(r => `
                 <div class="card" style="margin-bottom:8px">
-                    <h3>${r.rating}/5 &mdash; ${r.client_first} ${r.client_last}</h3>
-                    <div class="meta">${fmtDate(r.created_at)}</div>
-                    ${r.comment ? `<p style="margin:6px 0 0 0">${r.comment}</p>` : ''}
+                    <h3>${r.client_first} ${r.client_last}</h3>
+                    <div class="meta">${fmtStars(r.rating)} &nbsp;·&nbsp; ${fmtDate(r.created_at)}</div>
+                    ${r.comment ? `<p style="margin:8px 0 0 0">${r.comment}</p>` : ''}
                 </div>`).join('')}
     `;
 }
 
 async function loadProviderDash() {
     const html = await loadProviderDashHtml();
-    setPanel(`<h1 class="display">${state.user.first_name.toLowerCase()}'s dashboard</h1>` + html);
+    setPanel(`<h1 class="display">Dashboard</h1>` + html);
 }
 
 async function loadAdmin() {
     const stats = await api('/api/admin/stats');
     setPanel(`
         <h1 class="display">admin</h1>
-        <p class="sub">// system overview</p>
         <div class="cards">
             <div class="card"><h3>${stats.total_users}</h3><div class="meta">users</div></div>
             <div class="card"><h3>${stats.total_providers}</h3><div class="meta">providers</div></div>
             <div class="card"><h3>${stats.total_clients}</h3><div class="meta">clients</div></div>
             <div class="card"><h3>${stats.total_bookings}</h3><div class="meta">bookings</div></div>
         </div>
+        <div class="btn-row">
+            <button class="btn ghost" onclick="switchTab('adminUsers')">View users</button>
+            <button class="btn ghost" onclick="switchTab('adminChecks')">Manage checks</button>
+            <button class="btn ghost" onclick="switchTab('adminCategories')">Manage categories</button>
+        </div>
     `);
+}
+
+async function loadAdminUsers() {
+    const users = await api('/api/admin/users');
+    setPanel(`
+        <h1 class="display">users</h1>
+        ${users.length === 0 ? '<p class="muted">✦ &nbsp;No users on file.</p>' :
+            `<table class="grid">
+                <thead><tr><th>id</th><th>name</th><th>email</th><th>phone</th><th>role</th><th>joined</th></tr></thead>
+                <tbody>
+                    ${users.map(u => `
+                        <tr>
+                            <td>${u.user_id}</td>
+                            <td>${u.first_name} ${u.last_name}</td>
+                            <td>${u.email}</td>
+                            <td>${u.phone || '-'}</td>
+                            <td>${statusBadge(u.role_type)}</td>
+                            <td>${fmtDate(u.created_at)}</td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>`}
+    `);
+}
+
+async function loadAdminChecks() {
+    const checks = await api('/api/admin/checks');
+    setPanel(`
+        <h1 class="display">background checks</h1>
+        <div id="msg"></div>
+        ${checks.length === 0 ? '<p class="muted">✦ &nbsp;No background-check records yet.</p>' :
+            `<table class="grid">
+                <thead><tr><th>#</th><th>user</th><th>type</th><th>status</th><th>requested</th><th>completed</th><th>action</th></tr></thead>
+                <tbody>
+                    ${checks.map(c => `
+                        <tr>
+                            <td>${c.check_id}</td>
+                            <td>${c.first_name} ${c.last_name} <span class="muted">&middot; ${c.email}</span></td>
+                            <td>${c.check_type}</td>
+                            <td>${statusBadge(c.status)}</td>
+                            <td>${fmtDate(c.requested_at)}</td>
+                            <td>${c.completed_at ? fmtDate(c.completed_at) : '-'}</td>
+                            <td>
+                                <select id="cs-${c.check_id}">
+                                    ${['pending','approved','rejected'].map(s =>
+                                        `<option value="${s}" ${s===c.status?'selected':''}>${s}</option>`).join('')}
+                                </select>
+                                <button class="btn ghost" style="padding:3px 8px;font-size:11px"
+                                    onclick="updateCheck(${c.check_id})">Set</button>
+                            </td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>`}
+    `);
+}
+
+async function updateCheck(id) {
+    const status = document.getElementById('cs-' + id).value;
+    try {
+        await api(`/api/admin/checks/${id}/status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status })
+        });
+        await loadAdminChecks();
+    } catch (e) { showMsg(`<div class="error">${e.message}</div>`); }
+}
+
+async function loadAdminCategories() {
+    const cats = await api('/api/categories');
+    setPanel(`
+        <h1 class="display">categories</h1>
+        <div id="msg"></div>
+
+        <h2 class="section">add category</h2>
+        <form class="form" onsubmit="addCategory(event)">
+            <div class="field"><label>name</label><input name="name" required maxlength="60"></div>
+            <div class="btn-row"><button type="submit" class="btn accent">Add category</button></div>
+        </form>
+
+        <h2 class="section">existing</h2>
+        ${cats.length === 0 ? '<p class="muted">✦ &nbsp;No categories defined.</p>' :
+            `<table class="grid">
+                <thead><tr><th>id</th><th>name</th><th></th></tr></thead>
+                <tbody>
+                    ${cats.map(c => `
+                        <tr>
+                            <td>${c.category_id}</td>
+                            <td>${c.category_name}</td>
+                            <td>
+                                <button class="btn ghost" style="padding:3px 8px;font-size:11px"
+                                    onclick="deleteCategory(${c.category_id}, '${c.category_name.replace(/'/g, "\\'")}')">delete</button>
+                            </td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>`}
+    `);
+}
+
+async function addCategory(ev) {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    try {
+        await api('/api/admin/categories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: fd.get('name') })
+        });
+        await loadAdminCategories();
+    } catch (e) { showMsg(`<div class="error">${e.message}</div>`); }
+}
+
+async function deleteCategory(id, name) {
+    if (!await confirmDialog(`Delete category "${name}"? This cannot be undone.`, { okLabel: 'Delete' })) return;
+    try {
+        await api('/api/admin/categories/' + id, { method: 'DELETE' });
+        toast('Category deleted.');
+        await loadAdminCategories();
+    } catch (e) { toast(e.message, 'error'); }
 }
 
 function showMsg(html) {
@@ -544,10 +958,24 @@ async function saveProfile(ev) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
         });
-        showMsg('<div class="ok">saved</div>');
+        toast('Profile saved.');
     } catch (e) {
         showMsg(`<div class="error">${e.message}</div>`);
     }
+}
+
+async function requestCheck(ev) {
+    ev.preventDefault();
+    const fd = new FormData(ev.target);
+    try {
+        await api('/api/provider/checks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ check_type: fd.get('check_type') })
+        });
+        toast('Background check requested.');
+        await switchTab('profile');
+    } catch (e) { showMsg(`<div class="error">${e.message}</div>`); }
 }
 
 async function saveServices(ev) {
@@ -559,7 +987,7 @@ async function saveServices(ev) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ categories: ids })
         });
-        showMsg('<div class="ok">saved</div>');
+        toast('Categories saved.');
     } catch (e) {
         showMsg(`<div class="error">${e.message}</div>`);
     }
@@ -572,9 +1000,9 @@ async function openBooking(id) {
     const showPay = canActAsClient && !b.payment_id && b.status !== 'cancelled';
     const showReview = canActAsClient && !b.review_id && b.status === 'completed';
     setPanel(`
-        <h1 class="display">booking #${b.booking_id}</h1>
-        <p class="sub">// ${b.category_name}</p>
+        <h1 class="display">${b.category_name} <em>booking #${b.booking_id}</em></h1>
         <div id="msg"></div>
+        ${statusTimeline(b.status)}
 
         <div class="cards">
             <div class="card"><h3>${statusBadge(b.status)}</h3><div class="meta">status</div></div>
@@ -681,8 +1109,8 @@ async function submitReview(ev, bookingId) {
 
 function openRequestBooking(req) {
     setPanel(`
-        <h1 class="display">book request #${req.request_id}</h1>
-        <p class="sub">// ${req.category_name} for ${req.client_first} ${req.client_last}</p>
+        <h1 class="display">${req.category_name} <em>request #${req.request_id}</em></h1>
+        <p>For ${req.client_first} ${req.client_last}</p>
         <div id="msg"></div>
         <p>${req.description || ''}</p>
         <p class="muted">${req.street || ''}, ${req.city}, ${req.state} ${req.zip}</p>
@@ -699,11 +1127,12 @@ function openRequestBooking(req) {
 }
 
 async function deleteRequest(id) {
-    if (!confirm('delete request #' + id + '?')) return;
+    if (!await confirmDialog(`Delete request #${id}? This cannot be undone.`, { okLabel: 'Delete' })) return;
     try {
         await api('/api/requests/' + id, { method: 'DELETE' });
+        toast('Request deleted.');
         await switchTab('dashboard');
-    } catch (e) { alert(e.message); }
+    } catch (e) { toast(e.message, 'error'); }
 }
 
 async function confirmBooking(ev, requestId) {

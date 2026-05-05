@@ -3,20 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HomeNeedsService</title>
+<title>homeneeds &amp; co. — a directory of trusted home services</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght,SOFT@0,9..144,300..900,30..100;1,9..144,300..900,30..100&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 
+<div class="grain" aria-hidden="true"></div>
+
 <header class="topbar">
     <div class="brand">
-        <span class="brand-mark">[H]</span>
-        <span class="brand-name">homeneeds</span>
+        <span class="brand-mark">✦</span>
+        <span class="brand-name">homeneeds<span class="brand-amp">&amp;</span><i>co</i></span>
     </div>
-    <div class="account" id="account"></div>
+    <div class="topbar-meta">
+        <span class="topbar-eyebrow">Vol. I &nbsp;·&nbsp; A directory of trusted home services</span>
+        <div class="account" id="account"></div>
+    </div>
 </header>
 
 <div class="layout">
@@ -29,6 +34,10 @@
     </main>
 
 </div>
+
+<div id="announce" class="sr-only" aria-live="polite"></div>
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+<div id="modal-root" class="modal-root" aria-hidden="true"></div>
 
 <script src="/app.js"></script>
 </body>

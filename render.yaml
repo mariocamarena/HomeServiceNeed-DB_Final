@@ -4,7 +4,6 @@ services:
     name: homeneeds
     env: node
     plan: free
-    rootDir: app
     buildCommand: npm install
     startCommand: npm start
     envVars:

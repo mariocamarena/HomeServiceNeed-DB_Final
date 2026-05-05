@@ -12,7 +12,8 @@
     "db:test": "node scripts/test-connection.js",
     "db:rehash": "node scripts/rehash-seed.js",
     "test:fns": "node scripts/test-functions.js",
-    "test:flow": "node scripts/test-booking-flow.js"
+    "test:flow": "node scripts/test-booking-flow.js",
+    "test:partc": "node scripts/test-partC-tasks.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

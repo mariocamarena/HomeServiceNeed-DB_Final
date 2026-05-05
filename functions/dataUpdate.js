@@ -92,18 +92,36 @@ async function UpdateCheckStatus(checkId, status) {
 }
 
 async function AddCategory(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return { error: 'category name required' };
     const rows = await ExecuteQuery(
         `INSERT INTO service_categories (category_name) VALUES ($1)
          ON CONFLICT (category_name) DO NOTHING
          RETURNING category_id`,
-        [name]
+        [trimmed]
     );
     if (rows.length === 0) return { error: 'category already exists' };
     return { category_id: rows[0].category_id };
 }
 
+// only deletes when no provider currently offers it - prevents orphaning provider_services rows
+async function DeleteCategory(categoryId) {
+    const inUse = await ExecuteQuery(
+        `SELECT 1 FROM provider_services WHERE category_id = $1
+         UNION ALL SELECT 1 FROM service_requests WHERE category_id = $1 LIMIT 1`,
+        [categoryId]
+    );
+    if (inUse.length > 0) return { error: 'category in use - cannot delete' };
+    const rows = await ExecuteQuery(
+        'DELETE FROM service_categories WHERE category_id = $1 RETURNING category_id',
+        [categoryId]
+    );
+    if (rows.length === 0) return { error: 'category not found' };
+    return { ok: true };
+}
+
 module.exports = {
     CreateServiceRequest, UpdateProviderProfile, UpdateProviderServices,
     UpdateRequestStatus, DeleteServiceRequest, SubmitBackgroundCheck,
-    UpdateCheckStatus, AddCategory
+    UpdateCheckStatus, AddCategory, DeleteCategory
 };
