@@ -62,6 +62,7 @@ function ValidateRating(rating) {
     return n >= RATING_MIN && n <= RATING_MAX;
 }
 
+// just length for now - no complexity rules
 function ValidatePassword(pw) {
     if (typeof pw !== 'string') return false;
     return pw.length >= PASSWORD_MIN;

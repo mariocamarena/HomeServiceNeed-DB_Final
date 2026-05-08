@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const { ExecuteQuery } = require('../db');
 const { ValidateEmail, ValidatePassword } = require('./validation');
 
+// case-insensitive email lookup so "Bob@x.com" and "bob@x.com" hit the same row
 async function Authorize(email, password) {
     if (!email || !password) return false;
     const rows = await ExecuteQuery(
@@ -33,6 +34,7 @@ async function RegisterUser(firstName, lastName, email, phone, password, roleTyp
     );
     const userId = inserted[0].user_id;
 
+    // "both" gets two profile rows so they can act as either side later
     if (roleType === 'provider' || roleType === 'both') {
         await ExecuteQuery('INSERT INTO provider_profiles (provider_id) VALUES ($1)', [userId]);
     }

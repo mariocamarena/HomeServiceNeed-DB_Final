@@ -7,6 +7,7 @@ async function ProcessPayment(bookingId, amount, method) {
     const allowed = ['credit_card', 'debit', 'cash', 'other'];
     if (!allowed.includes(method)) return { error: 'bad method' };
 
+    // payment has to match what was agreed on - no partial / over payments
     const bk = await ExecuteQuery('SELECT agreed_price, status FROM bookings WHERE booking_id = $1', [bookingId]);
     if (bk.length === 0) return { error: 'booking not found' };
     if (!ValidatePaymentAmount(amount, bk[0].agreed_price)) return { error: 'amount must match agreed price' };
@@ -26,6 +27,7 @@ async function ProcessPayment(bookingId, amount, method) {
 async function SubmitReview(bookingId, rating, comment) {
     if (!ValidateRating(rating)) return { error: 'rating must be 1-5' };
 
+    // can only review after the job is actually done
     const bk = await ExecuteQuery('SELECT status FROM bookings WHERE booking_id = $1', [bookingId]);
     if (bk.length === 0) return { error: 'booking not found' };
     if (bk[0].status !== 'completed') return { error: 'booking not completed yet' };
