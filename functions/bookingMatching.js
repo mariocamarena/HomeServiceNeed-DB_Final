@@ -7,6 +7,7 @@ async function CreateBooking(requestId, providerId, scheduledStart, scheduledEnd
     if (!ValidateBookingDates(scheduledStart, scheduledEnd)) return { error: 'bad dates' };
     if (Number(agreedPrice) <= 0) return { error: 'bad price' };
 
+    // one booking per request - no double-booking the same job
     const exists = await ExecuteQuery('SELECT booking_id FROM bookings WHERE request_id = $1', [requestId]);
     if (exists.length > 0) return { error: 'request already booked' };
 

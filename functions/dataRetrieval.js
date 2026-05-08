@@ -23,6 +23,7 @@ async function ProviderSearchRetrieval(categoryId, zip, radiusMiles) {
     return filterByDistance(rows, zip || '', radiusMiles);
 }
 
+// pulls everything for one booking in a single query - request, payment, review, both users
 async function BookingDetailRetrieval(bookingId) {
     const sql = `
         SELECT b.*,
@@ -110,6 +111,7 @@ async function ServiceRequestListRetrieval(clientId) {
     );
 }
 
+// what a provider sees - matching requests with same-zip ones bumped to the top
 async function OpenRequestsByCategory(categoryId, zip) {
     const sql = `
         SELECT sr.*, sc.category_name,

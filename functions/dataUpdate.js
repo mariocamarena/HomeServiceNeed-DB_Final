@@ -15,6 +15,7 @@ async function CreateServiceRequest(clientId, categoryId, description, street, c
     return { request_id: rows[0].request_id };
 }
 
+// COALESCE means only the fields actually passed in get changed - everything else stays put
 async function UpdateProviderProfile(providerId, fields) {
     const { bio, home_zip, travel_radius_miles, base_rate } = fields;
     if (home_zip && !ValidateZipCode(home_zip)) return { error: 'bad zip' };
